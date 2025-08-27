@@ -19,6 +19,22 @@ class CommandeTab extends ConsumerStatefulWidget {
 
 class _CommandeTabState extends ConsumerState<CommandeTab> {
   final TextEditingController _noteController = TextEditingController();
+  bool _cartLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCartIfNeeded();
+  }
+
+  Future<void> _loadCartIfNeeded() async {
+    if (!_cartLoaded) {
+      await ref.read(selectedProduitsProvider.notifier).loadCart();
+      setState(() {
+        _cartLoaded = true;
+      });
+    }
+  }
 
   @override
   void dispose() {

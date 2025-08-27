@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:paragalien/models/produit.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:paragalien/core/constants.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class SelectedProduct {
   final Produit produit;
@@ -15,6 +17,22 @@ class SelectedProduct {
 
   SelectedProduct copyWith({Produit? produit, double? quantity}) {
     return SelectedProduct(produit ?? this.produit, quantity ?? this.quantity);
+  }
+
+  // Add toJson method for serialization
+  Map<String, dynamic> toJson() {
+    return {
+      'produit': produit.toMap(),
+      'quantity': quantity,
+    };
+  }
+
+  // Add fromJson factory constructor for deserialization
+  factory SelectedProduct.fromJson(Map<String, dynamic> json) {
+    return SelectedProduct(
+      Produit.fromJson(json['produit']),
+      (json['quantity'] as num).toDouble(),
+    );
   }
 
   @override
@@ -70,11 +88,49 @@ final produitsProvider = FutureProvider.autoDispose<List<Produit>>((ref) async {
 
 final selectedProduitsProvider =
     StateNotifierProvider<SelectedProduitsNotifier, List<SelectedProduct>>(
-      (ref) => SelectedProduitsNotifier(),
+      (ref) {
+        final notifier = SelectedProduitsNotifier();
+        // Load cart data when provider is created
+        Future.microtask(() => notifier.loadCart());
+        return notifier;
+      },
     );
 
 class SelectedProduitsNotifier extends StateNotifier<List<SelectedProduct>> {
   SelectedProduitsNotifier() : super([]);
+
+  static const String _cartKey = 'selected_products_cart';
+
+  // Load cart from SharedPreferences on initialization
+  Future<void> loadCart() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cartJson = prefs.getString(_cartKey);
+      
+      if (cartJson != null) {
+        final List<dynamic> cartList = jsonDecode(cartJson);
+        final List<SelectedProduct> loadedCart = cartList
+            .map((item) => SelectedProduct.fromJson(item))
+            .toList();
+        state = loadedCart;
+      }
+    } catch (e) {
+      print('Error loading cart: $e');
+      // If there's an error, start with empty cart
+      state = [];
+    }
+  }
+
+  // Save cart to SharedPreferences
+  Future<void> _saveCart() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cartJson = jsonEncode(state.map((item) => item.toJson()).toList());
+      await prefs.setString(_cartKey, cartJson);
+    } catch (e) {
+      print('Error saving cart: $e');
+    }
+  }
 
   void updateProduct(SelectedProduct updatedProduct) {
     state = [
@@ -84,6 +140,7 @@ class SelectedProduitsNotifier extends StateNotifier<List<SelectedProduct>> {
         else
           product,
     ];
+    _saveCart();
   }
 
   void add(Produit produit, double quantity) {
@@ -100,14 +157,17 @@ class SelectedProduitsNotifier extends StateNotifier<List<SelectedProduct>> {
     } else {
       state = [...state, SelectedProduct(produit, quantity)];
     }
+    _saveCart();
   }
 
   void remove(Produit produit) {
     state = state.where((sp) => sp.produit.id != produit.id).toList();
+    _saveCart();
   }
 
   void clear() {
     state = [];
+    _saveCart();
   }
 
   double getTotalPrice() {

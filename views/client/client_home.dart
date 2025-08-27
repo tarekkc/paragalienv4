@@ -26,6 +26,7 @@ class _ClientHomeState extends ConsumerState<ClientHome> {
   bool _showSearchBar = false;
   final FocusNode _searchFocusNode = FocusNode();
   StreamSubscription<AuthState>? _authSubscription;
+  bool _cartLoaded = false;
 
   final List<String> categories = [
     'Tous les produits',
@@ -43,6 +44,7 @@ class _ClientHomeState extends ConsumerState<ClientHome> {
   void initState() {
     super.initState();
     _getCurrentUser();
+    _loadCartData();
     _authSubscription = Supabase.instance.client.auth.onAuthStateChange.listen((
       event,
     ) {
@@ -50,6 +52,15 @@ class _ClientHomeState extends ConsumerState<ClientHome> {
         _currentUser = event.session?.user;
       });
     });
+  }
+
+  Future<void> _loadCartData() async {
+    if (!_cartLoaded) {
+      await ref.read(selectedProduitsProvider.notifier).loadCart();
+      setState(() {
+        _cartLoaded = true;
+      });
+    }
   }
 
   @override

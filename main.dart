@@ -182,6 +182,15 @@ class MyApp extends ConsumerWidget {
   const MyApp({super.key});
 
   @override
+  void initState() {
+    super.initState();
+    // Load cart data when app starts
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // This will be handled in ClientHome initState
+    });
+  }
+
+  @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authStateProvider);
     final currentTheme = ref.watch(themeProvider);

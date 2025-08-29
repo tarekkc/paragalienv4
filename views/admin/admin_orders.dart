@@ -8,7 +8,6 @@ import 'package:paragalien/providers/commande_provider.dart';
 import 'package:paragalien/providers/produit_provider.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-
 class AdminCreateOrderPage extends ConsumerStatefulWidget {
   const AdminCreateOrderPage({super.key});
 
@@ -21,13 +20,15 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
   Profile? _selectedClient;
   final List<SelectedProduct> _selectedProducts = [];
   final TextEditingController _clientSearchController = TextEditingController();
-  final TextEditingController _productSearchController =
-      TextEditingController();
+  final TextEditingController _productSearchController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
     _clientSearchController.dispose();
     _productSearchController.dispose();
+    _notesController.dispose();
     super.dispose();
   }
 
@@ -38,36 +39,66 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
     );
   }
 
+  int get _totalItems {
+    return _selectedProducts.fold(
+      0,
+      (sum, item) => sum + item.quantity.toInt(),
+    );
+  }
+
   Future<void> _submitOrder() async {
     if (_selectedClient == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Please select a client')));
+      _showSnackBar('Veuillez sélectionner un client', isError: true);
       return;
     }
 
     if (_selectedProducts.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please add at least one product')),
-      );
+      _showSnackBar('Veuillez ajouter au moins un produit', isError: true);
       return;
     }
 
-    try {
-      await ref
-          .read(commandeNotifierProvider)
-          .submitOrder(_selectedProducts, _selectedClient!.id);
+    setState(() => _isSubmitting = true);
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Order created successfully!')),
+    try {
+      final notes = _notesController.text.trim();
+      await ref.read(commandeNotifierProvider).submitOrderWithNotes(
+        _selectedProducts,
+        _selectedClient!.id,
+        notes.isNotEmpty ? notes : null,
       );
 
-      Navigator.of(context).pop();
+      if (mounted) {
+        _showSnackBar('Commande créée avec succès!');
+        
+        // Clear the form
+        setState(() {
+          _selectedClient = null;
+          _selectedProducts.clear();
+          _notesController.clear();
+        });
+
+        // Refresh orders list
+        ref.invalidate(allCommandesProvider);
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('Error creating order: $e')));
+      if (mounted) {
+        _showSnackBar('Erreur lors de la création: ${e.toString()}', isError: true);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
     }
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: Duration(seconds: isError ? 4 : 2),
+      ),
+    );
   }
 
   void _showClientSelectionDialog() {
@@ -75,17 +106,18 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Select Client'),
+          title: const Text('Sélectionner un client'),
           content: SizedBox(
             width: double.maxFinite,
+            height: 400,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: _clientSearchController,
                   decoration: const InputDecoration(
-                    labelText: 'Search clients',
+                    labelText: 'Rechercher des clients',
                     prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
                   ),
                   onChanged: (_) => setState(() {}),
                 ),
@@ -99,21 +131,18 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
                       }
 
                       if (snapshot.hasError) {
-                        return Center(child: Text('Error: ${snapshot.error}'));
+                        return Center(child: Text('Erreur: ${snapshot.error}'));
                       }
 
                       final clients = snapshot.data ?? [];
-                      final filteredClients =
-                          clients.where((client) {
-                            final query =
-                                _clientSearchController.text.toLowerCase();
-                            return client.email.toLowerCase().contains(query) ||
-                                (client.name?.toLowerCase().contains(query) ??
-                                    false);
-                          }).toList();
+                      final filteredClients = clients.where((client) {
+                        final query = _clientSearchController.text.toLowerCase();
+                        return client.email.toLowerCase().contains(query) ||
+                            (client.name?.toLowerCase().contains(query) ?? false);
+                      }).toList();
 
                       if (filteredClients.isEmpty) {
-                        return const Center(child: Text('No clients found'));
+                        return const Center(child: Text('Aucun client trouvé'));
                       }
 
                       return ListView.builder(
@@ -123,17 +152,27 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
                           return ListTile(
                             leading: const Icon(Icons.person),
                             title: Text(client.name ?? client.email),
-                            subtitle: Text(client.email),
-                            trailing:
-                                _selectedClient?.id == client.id
-                                    ? const Icon(
-                                      Icons.check,
-                                      color: Colors.green,
-                                    )
-                                    : null,
+                            subtitle: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(client.email),
+                                if (client.locations.isNotEmpty)
+                                  Text(
+                                    'Région: ${client.locations.join(', ')}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            trailing: _selectedClient?.id == client.id
+                                ? const Icon(Icons.check, color: Colors.green)
+                                : null,
                             onTap: () {
                               setState(() {
                                 _selectedClient = client;
+                                _clientSearchController.clear();
                               });
                               Navigator.of(context).pop();
                             },
@@ -149,7 +188,7 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: const Text('Annuler'),
             ),
           ],
         );
@@ -165,13 +204,10 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
           .eq('role', 'client')
           .order('name', ascending: true);
 
-      final clients =
-          (response as List).map((json) => Profile.fromJson(json)).toList();
-
-      return clients;
+      return (response as List).map((json) => Profile.fromJson(json)).toList();
     } catch (e) {
-      debugPrint('Error fetching clients: $e');
-      return []; // Return empty list on error
+      debugPrint('Erreur lors du chargement des clients: $e');
+      return [];
     }
   }
 
@@ -180,17 +216,18 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('Add Products'),
+          title: const Text('Ajouter des produits'),
           content: SizedBox(
             width: double.maxFinite,
+            height: 400,
             child: Column(
-              mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
                   controller: _productSearchController,
                   decoration: const InputDecoration(
-                    labelText: 'Search products',
+                    labelText: 'Rechercher des produits',
                     prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
                   ),
                   onChanged: (_) => setState(() {}),
                 ),
@@ -200,43 +237,48 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
                     builder: (context, ref, child) {
                       final productsAsync = ref.watch(produitsProvider);
                       return productsAsync.when(
-                        loading:
-                            () => const Center(
-                              child: CircularProgressIndicator(),
-                            ),
-                        error:
-                            (error, stack) =>
-                                Center(child: Text('Error: $error')),
+                        loading: () => const Center(child: CircularProgressIndicator()),
+                        error: (error, stack) => Center(child: Text('Erreur: $error')),
                         data: (products) {
-                          final filteredProducts =
-                              products.where((product) {
-                                final query =
-                                    _productSearchController.text.toLowerCase();
-                                return product.name.toLowerCase().contains(
-                                  query,
-                                );
-                              }).toList();
+                          final filteredProducts = products.where((product) {
+                            final query = _productSearchController.text.toLowerCase();
+                            return product.name.toLowerCase().contains(query);
+                          }).toList();
 
                           if (filteredProducts.isEmpty) {
-                            return const Center(
-                              child: Text('No products found'),
-                            );
+                            return const Center(child: Text('Aucun produit trouvé'));
                           }
 
                           return ListView.builder(
                             itemCount: filteredProducts.length,
                             itemBuilder: (context, index) {
                               final product = filteredProducts[index];
+                              final isAlreadyAdded = _selectedProducts
+                                  .any((sp) => sp.produit.id == product.id);
+
                               return ListTile(
                                 leading: const Icon(Icons.shopping_bag),
                                 title: Text(product.name),
-                                subtitle: Text(
-                                  '\$${product.price.toStringAsFixed(2)}',
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('${product.price.toStringAsFixed(2)} DZD'),
+                                    Text(
+                                      'Stock: ${product.quantity.toInt()}',
+                                      style: TextStyle(
+                                        color: product.quantity > 0 
+                                            ? Colors.green 
+                                            : Colors.red,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                                trailing: isAlreadyAdded
+                                    ? const Icon(Icons.check, color: Colors.green)
+                                    : null,
                                 onTap: () {
-                                  Navigator.of(
-                                    context,
-                                  ).pop(); // Close the product selection dialog
+                                  Navigator.of(context).pop();
                                   _showQuantityDialog(product);
                                 },
                               );
@@ -253,7 +295,7 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: const Text('Fermer'),
             ),
           ],
         );
@@ -261,174 +303,486 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
     );
   }
 
- void _showQuantityDialog(Produit product) {
-  final TextEditingController _quantityController = TextEditingController(text: '1');
+  void _showQuantityDialog(Produit product) {
+    final existingProduct = _selectedProducts
+        .where((sp) => sp.produit.id == product.id)
+        .firstOrNull;
+    
+    final TextEditingController quantityController = TextEditingController(
+      text: existingProduct?.quantity.toInt().toString() ?? '1',
+    );
 
-  showDialog(
-    context: context,
-    builder: (context) {
-      final quantity = int.tryParse(_quantityController.text) ?? 1;
-      final totalPrice = product.price * quantity;
-
-      return AlertDialog(
-        title: Text('Select Quantity for ${product.name}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              controller: _quantityController,
-              decoration: const InputDecoration(
-                labelText: 'Quantity',
-                border: OutlineInputBorder(),
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Quantité pour ${product.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: quantityController,
+                decoration: InputDecoration(
+                  labelText: 'Quantité',
+                  border: const OutlineInputBorder(),
+                  helperText: 'Stock disponible: ${product.quantity.toInt()}',
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               ),
-              keyboardType: TextInputType.number,
-              inputFormatters: [
-                FilteringTextInputFormatter.digitsOnly,
-              ],
-              onChanged: (value) {
-                // Update the total price when quantity changes
+              const SizedBox(height: 16),
+              Text(
+                'Prix unitaire: ${product.price.toStringAsFixed(2)} DZD',
+                style: const TextStyle(fontSize: 16),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final quantity = int.tryParse(quantityController.text) ?? 0;
+                if (quantity > 0 && quantity <= product.quantity) {
+                  _addOrUpdateProduct(product, quantity.toDouble());
+                  Navigator.pop(context);
+                } else {
+                  _showSnackBar(
+                    'Quantité invalide (1-${product.quantity.toInt()})',
+                    isError: true,
+                  );
+                }
               },
-            ),
-            const SizedBox(height: 20),
-            Text(
-              'Price per unit: \$${product.price.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 16),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Total: \$${totalPrice.toStringAsFixed(2)}',
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              child: Text(existingProduct != null ? 'Mettre à jour' : 'Ajouter'),
             ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
+        );
+      },
+    );
+  }
+
+  void _addOrUpdateProduct(Produit product, double quantity) {
+    setState(() {
+      final existingIndex = _selectedProducts
+          .indexWhere((sp) => sp.produit.id == product.id);
+      
+      if (existingIndex >= 0) {
+        _selectedProducts[existingIndex] = SelectedProduct(product, quantity);
+      } else {
+        _selectedProducts.add(SelectedProduct(product, quantity));
+      }
+    });
+  }
+
+  void _removeProduct(int index) {
+    setState(() {
+      _selectedProducts.removeAt(index);
+    });
+  }
+
+  void _updateProductQuantity(int index, double newQuantity) {
+    if (newQuantity <= 0) {
+      _removeProduct(index);
+      return;
+    }
+
+    setState(() {
+      final product = _selectedProducts[index];
+      _selectedProducts[index] = SelectedProduct(product.produit, newQuantity);
+    });
+  }
+
+  void _showEditQuantityDialog(int index) {
+    final product = _selectedProducts[index];
+    final TextEditingController controller = TextEditingController(
+      text: product.quantity.toInt().toString(),
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Modifier ${product.produit.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextFormField(
+                controller: controller,
+                decoration: InputDecoration(
+                  labelText: 'Nouvelle quantité',
+                  border: const OutlineInputBorder(),
+                  helperText: 'Stock disponible: ${product.produit.quantity.toInt()}',
+                ),
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Quantité actuelle: ${product.quantity.toInt()}',
+                style: const TextStyle(color: Colors.grey),
+              ),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () {
-              final quantity = int.tryParse(_quantityController.text) ?? 1;
-              if (quantity > 0) {
-                setState(() {
-                  final existingIndex = _selectedProducts.indexWhere(
-                    (sp) => sp.produit.id == product.id
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final newQuantity = int.tryParse(controller.text) ?? 0;
+                if (newQuantity > 0 && newQuantity <= product.produit.quantity) {
+                  _updateProductQuantity(index, newQuantity.toDouble());
+                  Navigator.pop(context);
+                } else {
+                  _showSnackBar(
+                    'Quantité invalide (1-${product.produit.quantity.toInt()})',
+                    isError: true,
                   );
-                  
-                  if (existingIndex >= 0) {
-                    // Update existing product quantity
-                    _selectedProducts[existingIndex] = SelectedProduct(
-                      product,
-                      _selectedProducts[existingIndex].quantity + quantity.toDouble(),
-                    );
-                  } else {
-                    // Add new product
-                    _selectedProducts.add(SelectedProduct(product, quantity.toDouble()));
-                  }
-                });
-                Navigator.of(context).pop();
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a valid quantity (1 or more)')),
-                );
-              }
-            },
-            child: const Text('Add to Order'),
-          ),
-        ],
-      );
-    },
-  );
-}
+                }
+              },
+              child: const Text('Mettre à jour'),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Create Order (Admin)')),
-      body: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // MODIFY THIS SECTION - change from Column to Row
-            Row(
+      appBar: AppBar(
+        title: const Text('Créer une commande'),
+        actions: [
+          if (_selectedProducts.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.clear_all),
+              onPressed: () {
+                setState(() {
+                  _selectedProducts.clear();
+                  _notesController.clear();
+                });
+              },
+              tooltip: 'Vider le panier',
+            ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Client and Product Selection Row
+          Padding(
+            padding: const EdgeInsets.all(16.0),
+            child: Row(
               children: [
                 Expanded(
                   child: Card(
+                    elevation: 2,
                     child: ListTile(
-                      leading: const Icon(Icons.person, size: 17),
+                      leading: const Icon(Icons.person, size: 20),
                       title: Text(
                         _selectedClient == null
-                            ? 'Select Client'
-                            : 'Client: ${_selectedClient!.name ?? _selectedClient!.email}',
-                        style: const TextStyle(fontSize: 12),
+                            ? 'Sélectionner un client'
+                            : _selectedClient!.name ?? _selectedClient!.email,
+                        style: const TextStyle(fontSize: 14),
                       ),
+                      subtitle: _selectedClient != null
+                          ? Text(
+                              _selectedClient!.locations.join(', '),
+                              style: const TextStyle(fontSize: 12),
+                            )
+                          : null,
                       onTap: _showClientSelectionDialog,
+                      trailing: _selectedClient != null
+                          ? const Icon(Icons.check, color: Colors.green, size: 20)
+                          : const Icon(Icons.arrow_forward_ios, size: 16),
                     ),
                   ),
                 ),
-                const SizedBox(width: 18), // Add horizontal spacing
+                const SizedBox(width: 8),
                 Expanded(
                   child: Card(
+                    elevation: 2,
                     child: ListTile(
-                      leading: const Icon(Icons.shopping_bag, size: 17),
+                      leading: const Icon(Icons.add_shopping_cart, size: 20),
                       title: const Text(
-                        'Add Products',
-                        style: TextStyle(fontSize: 12),
+                        'Ajouter des produits',
+                        style: TextStyle(fontSize: 14),
                       ),
                       onTap: _showProductSelectionDialog,
+                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                     ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 5),
-            if (_selectedProducts.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Expanded(
-                child: ListView.builder(
-                  itemCount: _selectedProducts.length,
-                  itemBuilder: (context, index) {
-                    final item = _selectedProducts[index];
-                    return Card(
-                      child: ListTile(
-                        leading: const Icon(Icons.shopping_bag),
-                        title: Text(item.produit.name),
-                        subtitle: Text(
-                          'Quantity: ${item.quantity} x \$${item.produit.price.toStringAsFixed(2)}',
+          ),
+
+          // Notes Section
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            child: TextField(
+              controller: _notesController,
+              decoration: const InputDecoration(
+                labelText: 'Notes pour la commande (optionnel)',
+                border: OutlineInputBorder(),
+                prefixIcon: Icon(Icons.note),
+              ),
+              maxLines: 2,
+            ),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Selected Products List
+          if (_selectedProducts.isNotEmpty) ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Produits sélectionnés ($_totalItems)',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  Text(
+                    '${_totalPrice.toStringAsFixed(2)} DZD',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                itemCount: _selectedProducts.length,
+                itemBuilder: (context, index) {
+                  final item = _selectedProducts[index];
+                  final totalItemPrice = item.produit.price * item.quantity;
+
+                  return Card(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        children: [
+                          Row(
+                            children: [
+                              // Product Image
+                              Container(
+                                width: 50,
+                                height: 50,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(8),
+                                  color: Colors.grey[200],
+                                ),
+                                child: item.produit.imageUrl != null
+                                    ? ClipRRect(
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Image.network(
+                                          item.produit.imageUrl!,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) =>
+                                              const Icon(Icons.shopping_bag),
+                                        ),
+                                      )
+                                    : const Icon(Icons.shopping_bag),
+                              ),
+                              const SizedBox(width: 12),
+
+                              // Product Info
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      item.produit.name,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${item.produit.price.toStringAsFixed(2)} DZD/unité',
+                                      style: const TextStyle(
+                                        color: Colors.grey,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Stock: ${item.produit.quantity.toInt()}',
+                                      style: TextStyle(
+                                        color: item.produit.quantity > 0 
+                                            ? Colors.green 
+                                            : Colors.red,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+
+                              // Quantity and Actions
+                              Column(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Colors.blue.shade50,
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: Text(
+                                      '×${item.quantity.toInt()}',
+                                      style: TextStyle(
+                                        color: Colors.blue.shade800,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, size: 20),
+                                        onPressed: () => _showEditQuantityDialog(index),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        color: Colors.blue,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete, size: 20),
+                                        onPressed: () => _removeProduct(index),
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        color: Colors.red,
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'Total pour ce produit:',
+                                style: TextStyle(fontSize: 12, color: Colors.grey),
+                              ),
+                              Text(
+                                '${totalItemPrice.toStringAsFixed(2)} DZD',
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.green,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ] else
+            const Expanded(
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.grey),
+                    SizedBox(height: 16),
+                    Text(
+                      'Aucun produit sélectionné',
+                      style: TextStyle(fontSize: 18, color: Colors.grey),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Commencez par sélectionner un client et ajouter des produits',
+                      style: TextStyle(fontSize: 14, color: Colors.grey),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // Submit Button
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).scaffoldBackgroundColor,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.grey.withOpacity(0.3),
+                  spreadRadius: 1,
+                  blurRadius: 5,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _isSubmitting ? null : _submitOrder,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.green,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: _isSubmitting
+                    ? const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          ),
+                          SizedBox(width: 12),
+                          Text('Création en cours...'),
+                        ],
+                      )
+                    : Text(
+                        _selectedProducts.isEmpty
+                            ? 'Ajouter des produits pour continuer'
+                            : 'Créer la commande (${_totalPrice.toStringAsFixed(2)} DZD)',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  },
-                ),
               ),
-              const Divider(),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8.0),
-                child: Text(
-                  'Total: \$${_totalPrice.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  textAlign: TextAlign.end,
-                ),
-              ),
-            ],
-            const SizedBox(height: 8),
-            ElevatedButton(
-              onPressed: _submitOrder,
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                backgroundColor: Colors.green,
-              ),
-              child: const Text('Create Order', style: TextStyle(fontSize: 12)),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

@@ -105,6 +105,7 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
     showDialog(
       context: context,
       builder: (context) {
+        String searchQuery = '';
         return AlertDialog(
           title: const Text('Sélectionner un client'),
           content: SizedBox(
@@ -112,69 +113,79 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
             height: 400,
             child: Column(
               children: [
-                TextField(
-                  controller: _clientSearchController,
-                  decoration: const InputDecoration(
-                    labelText: 'Rechercher des clients',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
+                StatefulBuilder(
+                  builder: (context, setState) {
+                    return TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Rechercher des clients',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          searchQuery = value;
+                        });
+                      },
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: FutureBuilder<List<Profile>>(
-                    future: _fetchClients(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
+                  child: StatefulBuilder(
+                    builder: (context, setState) {
+                      return FutureBuilder<List<Profile>>(
+                        future: _fetchClients(),
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
 
-                      if (snapshot.hasError) {
-                        return Center(child: Text('Erreur: ${snapshot.error}'));
-                      }
+                          if (snapshot.hasError) {
+                            return Center(child: Text('Erreur: ${snapshot.error}'));
+                          }
 
-                      final clients = snapshot.data ?? [];
-                      final filteredClients = clients.where((client) {
-                        final query = _clientSearchController.text.toLowerCase();
-                        return client.email.toLowerCase().contains(query) ||
-                            (client.name?.toLowerCase().contains(query) ?? false);
-                      }).toList();
+                          final clients = snapshot.data ?? [];
+                          final filteredClients = clients.where((client) {
+                            final query = searchQuery.toLowerCase();
+                            return client.email.toLowerCase().contains(query) ||
+                                (client.name?.toLowerCase().contains(query) ?? false);
+                          }).toList();
 
-                      if (filteredClients.isEmpty) {
-                        return const Center(child: Text('Aucun client trouvé'));
-                      }
+                          if (filteredClients.isEmpty) {
+                            return const Center(child: Text('Aucun client trouvé'));
+                          }
 
-                      return ListView.builder(
-                        itemCount: filteredClients.length,
-                        itemBuilder: (context, index) {
-                          final client = filteredClients[index];
-                          return ListTile(
-                            leading: const Icon(Icons.person),
-                            title: Text(client.name ?? client.email),
-                            subtitle: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(client.email),
-                                if (client.locations.isNotEmpty)
-                                  Text(
-                                    'Région: ${client.locations.join(', ')}',
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      color: Colors.grey,
-                                    ),
-                                  ),
-                              ],
-                            ),
-                            trailing: _selectedClient?.id == client.id
-                                ? const Icon(Icons.check, color: Colors.green)
-                                : null,
-                            onTap: () {
-                              setState(() {
-                                _selectedClient = client;
-                                _clientSearchController.clear();
-                              });
-                              Navigator.of(context).pop();
+                          return ListView.builder(
+                            itemCount: filteredClients.length,
+                            itemBuilder: (context, index) {
+                              final client = filteredClients[index];
+                              return ListTile(
+                                leading: const Icon(Icons.person),
+                                title: Text(client.name ?? client.email),
+                                subtitle: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(client.email),
+                                    if (client.locations.isNotEmpty)
+                                      Text(
+                                        'Région: ${client.locations.join(', ')}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Colors.grey,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                trailing: _selectedClient?.id == client.id
+                                    ? const Icon(Icons.check, color: Colors.green)
+                                    : null,
+                                onTap: () {
+                                  setState(() {
+                                    _selectedClient = client;
+                                  });
+                                  Navigator.of(context).pop();
+                                },
+                              );
                             },
                           );
                         },
@@ -215,71 +226,102 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
     showDialog(
       context: context,
       builder: (context) {
+        String searchQuery = '';
         return AlertDialog(
           title: const Text('Ajouter des produits'),
           content: SizedBox(
-            width: double.maxFinite,
+            width: MediaQuery.of(context).size.width * 0.9,
             height: 400,
             child: Column(
               children: [
-                TextField(
-                  controller: _productSearchController,
-                  decoration: const InputDecoration(
-                    labelText: 'Rechercher des produits',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (_) => setState(() {}),
+                StatefulBuilder(
+                  builder: (context, setState) {
+                    return TextField(
+                      decoration: const InputDecoration(
+                        labelText: 'Rechercher des produits',
+                        prefixIcon: Icon(Icons.search),
+                        border: OutlineInputBorder(),
+                      ),
+                      onChanged: (value) {
+                        setState(() {
+                          searchQuery = value;
+                        });
+                      },
+                    );
+                  },
                 ),
                 const SizedBox(height: 16),
                 Expanded(
-                  child: Consumer(
-                    builder: (context, ref, child) {
-                      final productsAsync = ref.watch(produitsProvider);
-                      return productsAsync.when(
-                        loading: () => const Center(child: CircularProgressIndicator()),
-                        error: (error, stack) => Center(child: Text('Erreur: $error')),
-                        data: (products) {
-                          final filteredProducts = products.where((product) {
-                            final query = _productSearchController.text.toLowerCase();
-                            return product.name.toLowerCase().contains(query);
-                          }).toList();
+                  child: StatefulBuilder(
+                    builder: (context, setState) {
+                      return Consumer(
+                        builder: (context, ref, child) {
+                          final productsAsync = ref.watch(produitsProvider);
+                          return productsAsync.when(
+                            loading: () => const Center(child: CircularProgressIndicator()),
+                            error: (error, stack) => Center(child: Text('Erreur: $error')),
+                            data: (products) {
+                              final filteredProducts = products.where((product) {
+                                final query = searchQuery.toLowerCase();
+                                return product.name.toLowerCase().contains(query);
+                              }).toList();
 
-                          if (filteredProducts.isEmpty) {
-                            return const Center(child: Text('Aucun produit trouvé'));
-                          }
+                              if (filteredProducts.isEmpty) {
+                                return const Center(child: Text('Aucun produit trouvé'));
+                              }
 
-                          return ListView.builder(
-                            itemCount: filteredProducts.length,
-                            itemBuilder: (context, index) {
-                              final product = filteredProducts[index];
-                              final isAlreadyAdded = _selectedProducts
-                                  .any((sp) => sp.produit.id == product.id);
+                              return ListView.builder(
+                                itemCount: filteredProducts.length,
+                                itemBuilder: (context, index) {
+                                  final product = filteredProducts[index];
+                                  final isAlreadyAdded = _selectedProducts
+                                      .any((sp) => sp.produit.id == product.id);
 
-                              return ListTile(
-                                leading: const Icon(Icons.shopping_bag),
-                                title: Text(product.name),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('${product.price.toStringAsFixed(2)} DZD'),
-                                    Text(
-                                      'Stock: ${product.quantity.toInt()}',
-                                      style: TextStyle(
-                                        color: product.quantity > 0 
-                                            ? Colors.green 
-                                            : Colors.red,
-                                        fontSize: 12,
+                                  return Card(
+                                    margin: const EdgeInsets.symmetric(vertical: 4),
+                                    child: ListTile(
+                                      leading: product.imageUrl != null
+                                          ? ClipRRect(
+                                              borderRadius: BorderRadius.circular(8),
+                                              child: Image.network(
+                                                product.imageUrl!,
+                                                width: 50,
+                                                height: 50,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) =>
+                                                    const Icon(Icons.shopping_bag),
+                                              ),
+                                            )
+                                          : const Icon(Icons.shopping_bag),
+                                      title: Text(
+                                        product.name,
+                                        style: const TextStyle(fontWeight: FontWeight.w500),
                                       ),
+                                      subtitle: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text('${product.price.toStringAsFixed(2)} DZD'),
+                                          Text(
+                                            'Stock: ${product.quantity.toInt()}',
+                                            style: TextStyle(
+                                              color: product.quantity > 0 
+                                                  ? Colors.green 
+                                                  : Colors.red,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      trailing: isAlreadyAdded
+                                          ? const Icon(Icons.check, color: Colors.green)
+                                          : const Icon(Icons.add),
+                                      onTap: () {
+                                        Navigator.of(context).pop();
+                                        _showQuantityDialog(product);
+                                      },
                                     ),
-                                  ],
-                                ),
-                                trailing: isAlreadyAdded
-                                    ? const Icon(Icons.check, color: Colors.green)
-                                    : null,
-                                onTap: () {
-                                  Navigator.of(context).pop();
-                                  _showQuantityDialog(product);
+                                  );
                                 },
                               );
                             },
@@ -455,7 +497,23 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Créer une commande'),
+        title: Row(
+          children: [
+            const Text('Créer une commande'),
+            const Spacer(),
+            IconButton(
+              icon: const Icon(Icons.person_add, size: 28),
+              onPressed: _showClientSelectionDialog,
+              tooltip: 'Sélectionner un client',
+            ),
+            const SizedBox(width: 8),
+            IconButton(
+              icon: const Icon(Icons.add_shopping_cart, size: 28),
+              onPressed: _showProductSelectionDialog,
+              tooltip: 'Ajouter des produits',
+            ),
+          ],
+        ),
         actions: [
           if (_selectedProducts.isNotEmpty)
             IconButton(
@@ -472,57 +530,9 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
       ),
       body: Column(
         children: [
-          // Client and Product Selection Row
+          // Notes Section (moved to top)
           Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Card(
-                    elevation: 2,
-                    child: ListTile(
-                      leading: const Icon(Icons.person, size: 20),
-                      title: Text(
-                        _selectedClient == null
-                            ? 'Sélectionner un client'
-                            : _selectedClient!.name ?? _selectedClient!.email,
-                        style: const TextStyle(fontSize: 14),
-                      ),
-                      subtitle: _selectedClient != null
-                          ? Text(
-                              _selectedClient!.locations.join(', '),
-                              style: const TextStyle(fontSize: 12),
-                            )
-                          : null,
-                      onTap: _showClientSelectionDialog,
-                      trailing: _selectedClient != null
-                          ? const Icon(Icons.check, color: Colors.green, size: 20)
-                          : const Icon(Icons.arrow_forward_ios, size: 16),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Card(
-                    elevation: 2,
-                    child: ListTile(
-                      leading: const Icon(Icons.add_shopping_cart, size: 20),
-                      title: const Text(
-                        'Ajouter des produits',
-                        style: TextStyle(fontSize: 14),
-                      ),
-                      onTap: _showProductSelectionDialog,
-                      trailing: const Icon(Icons.arrow_forward_ios, size: 16),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          // Notes Section
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 8.0),
             child: TextField(
               controller: _notesController,
               decoration: const InputDecoration(
@@ -533,6 +543,25 @@ class _AdminCreateOrderPageState extends ConsumerState<AdminCreateOrderPage> {
               maxLines: 2,
             ),
           ),
+
+          // Selected Client Info (compact)
+          if (_selectedClient != null)
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 4.0),
+              padding: const EdgeInsets.all(8.0),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.person, color: Colors.green, size: 16),
+                  const SizedBox(width: 8),
+                  Text('Client: ${_selectedClient!.name ?? _selectedClient!.email}'),
+                ],
+              ),
+            ),
 
           const SizedBox(height: 16),
 
